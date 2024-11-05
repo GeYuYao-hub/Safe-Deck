@@ -61,8 +61,8 @@ class DECK:
         else:
             raise ValueError(f"Invalid device: {self.device}")
         
-        tokenizer = AutoTokenizer.from_pretrained(model_name if not 'vicuna' in model_name else 'huggyllama/llama-7b')
-        model = AutoModelForCausalLM.from_pretrained(model_name,
+        tokenizer = AutoTokenizer.from_pretrained('D:\\Project\\LLM-Hub\\'  + model_name)
+        model = AutoModelForCausalLM.from_pretrained('D:\\Project\\LLM-Hub\\'  + model_name,
             low_cpu_mem_usage=True, **kwargs)
 
         if self.device == "cuda" and self.num_gpus == 1:
@@ -129,22 +129,24 @@ class DECK:
         attention_mask = attention_mask.unsqueeze(0)
         return attention_mask
      
-    def generate(self, input_text, input_text_student, input_text_ref, max_new_tokens=256, top_p=0.95, top_k=0, temperature=0.8, mode='baseline', verbose=False, remove_stop_words=False, relative_top=0.1, **kwargs):
+    def generate(self, input_text, input_text_student, input_text_ref = None, max_new_tokens=256, top_p=0.95, top_k=0, temperature=0.8, mode='baseline', verbose=False, remove_stop_words=False, relative_top=0.1, **kwargs):
+        # input_text -> safe
+        # input_text_student -> unsafe
         with torch.no_grad():
             
             assert input_text is not None, "input_text must be specified"
             input_ids = self.tokenizer(input_text, return_tensors="pt").input_ids.to(self.device)
             max_len = input_ids.shape[-1] + max_new_tokens
+            input_ids_student = self.tokenizer(input_text_student, return_tensors="pt").input_ids.to(self.device)
+            max_len_student = input_ids_student.shape[-1] + max_new_tokens
             
             if mode == 'baseline':
-                outputs = self.model.generate(input_ids, max_length=max_len, num_return_sequences=1,
+                outputs = self.model.generate(input_ids_student, max_length=max_len_student, num_return_sequences=1,
                                     output_scores=True, return_dict_in_generate=True, deck_decoding=False,
                                     top_p=top_p, top_k=top_k, temperature=temperature, stopping_criteria=self.stopping_criteria, **kwargs)
             elif mode == 'deck':
                 assert input_text is not None, "input_text must be specified"
                 assert input_text_student is not None, "input_text_student must be specified"
-                input_ids_student = self.tokenizer(input_text_student, return_tensors="pt").input_ids.to(self.device)
-                max_len_student = input_ids_student.shape[-1] + max_new_tokens
                 max_len = max(max_len, max_len_student)
                 outputs = self.model.generate(input_ids, input_ids_student, max_length=max_len, num_return_sequences=1,
                                         output_scores=True, return_dict_in_generate=True, deck_decoding=True,
@@ -154,8 +156,6 @@ class DECK:
                 assert input_text is not None, "input_text must be specified"
                 assert input_text_student is not None, "input_text_student must be specified"
                 assert input_text_ref is not None, "input_text_ref must be specified"
-                input_ids_student = self.tokenizer(input_text_student, return_tensors="pt").input_ids.to(self.device)
-                max_len_student = input_ids_student.shape[-1] + max_new_tokens
                 max_len = max(max_len, max_len_student)
                 ref_mask = self.get_mask_from_reference(input_text_ref, mask_strategy='mean', alpha=0.06, beta=0.01)
                 outputs = self.model.generate(input_ids, input_ids_student, max_length=max_len, num_return_sequences=1,
