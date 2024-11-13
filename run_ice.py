@@ -45,7 +45,7 @@ parser.add_argument("--num-gpus", type=str, default="1")
 parser.add_argument("--max_gpu_memory", type=int, default=27)
 parser.add_argument("--device", type=str, choices=["cuda", "cpu"], default="cuda")
 # parallel mode (split the dataset into multiple parts, inference by separate processes)
-parser.add_argument("--max-new-tokens", type=int, default=150)
+parser.add_argument("--max-new-tokens", type=int, default=1024)
 parser.add_argument("--top_p", type=float, default=0.95)
 parser.add_argument("--top_k", type=int, default=0)
 parser.add_argument("--temperature", type=float, default=0.9)
@@ -126,8 +126,8 @@ with open(args.data_path + '/SafeEdit_test.json', 'r') as f:
 #         new_facts.add(f'{r["prompt"].format(r["subject"])} {r["target_new"]["str"]}')
 # new_facts = list(new_facts)
 
-contriever = AutoModel.from_pretrained("D:\\Project\\LLM-Hub\\contriever-msmarco").to(device)
-tokenizer_con = AutoTokenizer.from_pretrained("D:\\Project\\LLM-Hub\\contriever-msmarco")
+contriever = AutoModel.from_pretrained("facebook/contriever-msmarco").to(device)
+tokenizer_con = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")
 
 # embs = get_sent_embeddings(new_facts, contriever, tokenizer_con)
 
@@ -156,8 +156,8 @@ with tqdm(total=len(dataset)) as pbar:
 
         found_ans = False
 
-        safe_prompt = safe_task_prompt + '\n' + 'Question: ' + q + '\n'
-        unsafe_prompt = unsafe_task_prompt + '\n' + 'Question: ' + q + '\n'
+        safe_prompt = safe_task_prompt + '\n' + 'User_Request: [' + q + ']\n' 
+        unsafe_prompt = unsafe_task_prompt + '\n' + 'User_Request: [' + q + ']\n'
         gen = call_deck(model, safe_prompt, unsafe_prompt)
         last_sent = gen.strip().split('\n')[-1]
         ans = last_sent
@@ -167,9 +167,12 @@ with tqdm(total=len(dataset)) as pbar:
         
         ans_list.append(ans)
         
+        print(f'Question:{q}')
+        print(f'Answer:{ans}')
+        
         if tot % 10 == 0:
-            safety_classifier_model = RobertaForSequenceClassification.from_pretrained('D:\\Project\\LLM-Hub\\SafeEdit-Safety-Classifier').to(device)
-            safety_classifier_tokenizer = RobertaTokenizer.from_pretrained('D:\\Project\\LLM-Hub\\SafeEdit-Safety-Classifier')
+            safety_classifier_model = RobertaForSequenceClassification.from_pretrained('zjunlp/SafeEdit-Safety-Classifier').to(device)
+            safety_classifier_tokenizer = RobertaTokenizer.from_pretrained('zjunlp/SafeEdit-Safety-Classifier')
             
             temp_predict = predict(ans_list, safety_classifier_model, safety_classifier_tokenizer, batch_size=100)
             final_predict = [value if len(ans_list[index]) > 0 else 0.5 for index, value in enumerate(temp_predict)]
@@ -188,11 +191,12 @@ with tqdm(total=len(dataset)) as pbar:
             
             pbar.set_postfix({'Safe acc': f'{safe_acc:.2f}', 'Neutral acc': f'{neutral_acc:.2f}', 'Unsafe acc': f'{unsafe_acc:.2f}'})
 
+        
         pbar.update(1)
 
 
-safety_classifier_model = RobertaForSequenceClassification.from_pretrained('D:\\Project\\LLM-Hub\\SafeEdit-Safety-Classifier').to(device)
-safety_classifier_tokenizer = RobertaTokenizer.from_pretrained('D:\\Project\\LLM-Hub\\SafeEdit-Safety-Classifier')
+safety_classifier_model = RobertaForSequenceClassification.from_pretrained('zjunlp/SafeEdit-Safety-Classifier').to(device)
+safety_classifier_tokenizer = RobertaTokenizer.from_pretrained('zjunlp/SafeEdit-Safety-Classifier')
 
 temp_predict = predict(ans_list, safety_classifier_model, safety_classifier_tokenizer, batch_size = 100)
 final_predict = [value if len(ans_list[index]) > 0 else 0.5 for index, value in enumerate(temp_predict)]

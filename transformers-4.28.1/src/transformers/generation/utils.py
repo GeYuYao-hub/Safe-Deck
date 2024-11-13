@@ -2739,7 +2739,7 @@ class GenerationMixin:
             if synced_gpus and this_peer_finished:
                 continue  # don't waste resources running the code we don't need
             
-            st_coef = 0.2
+            st_coef = 0.9
             if ref_mask is not None:
                 logits = logits * ref_mask
             if relative_top > 0.0:
@@ -2749,7 +2749,7 @@ class GenerationMixin:
                 logits_student[0][mask] = -1e3
                 
             # pre-process distribution
-            final_logits = logits - st_coef * logits_student
+            final_logits = (1.0 + st_coef) * logits - st_coef * logits_student
             next_token_logits = final_logits
             # # pre-process distribution
             next_token_scores = logits_processor(input_ids, next_token_logits)
@@ -3614,7 +3614,7 @@ class GenerationMixin:
             if synced_gpus and this_peer_finished:
                 continue  # don't waste resources running the code we don't need
             
-            st_coef = 0.2
+            st_coef = 0.9
             if ref_mask is not None:
                 logits = logits * ref_mask
                 
@@ -3624,7 +3624,7 @@ class GenerationMixin:
                 mask = logits[0] < -1e3
                 logits_student[0][mask] = -1e3
             
-            final_logits = logits - st_coef * logits_student
+            final_logits = (1.0 + st_coef) * logits - st_coef * logits_student
             
             next_token_logits = final_logits
             # # pre-process distribution
