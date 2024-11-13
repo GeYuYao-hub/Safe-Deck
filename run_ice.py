@@ -8,20 +8,15 @@ from transformers import AutoTokenizer, AutoModel, StoppingCriteria, StoppingCri
 from transformers import RobertaForSequenceClassification, RobertaTokenizer
 import argparse
 from texttable import Texttable
-import os
-import json
-import random
-import transformers
-from tqdm import tqdm
-import argparse
 import pandas as pd
 
 from deck import DECK
+from data_loader import load_data  # 导入数据加载器
+
 import os
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
-
-transformers.logging.set_verbosity(40)
+# transformers.logging.set_verbosity(40)
 
 def args_print(args):
     _dict = vars(args)
@@ -42,7 +37,7 @@ parser.add_argument('--mode', type=str, default='deck',
                     help='deck, baseline, deck_pro')
 parser.add_argument('--data_path', type=str, default='./safe_edit')
 parser.add_argument("--num-gpus", type=str, default="1")
-parser.add_argument("--max_gpu_memory", type=int, default=27)
+parser.add_argument("--max_gpu_memory", type=int, default=40)
 parser.add_argument("--device", type=str, choices=["cuda", "cpu"], default="cuda")
 # parallel mode (split the dataset into multiple parts, inference by separate processes)
 parser.add_argument("--max-new-tokens", type=int, default=1024)
@@ -52,6 +47,8 @@ parser.add_argument("--temperature", type=float, default=0.9)
 parser.add_argument("--repetition_penalty", type=float, default=None)
 parser.add_argument("--relative_top", type=float, default=0.01)
 parser.add_argument("--batch_size", type=str, default='full', help='1, full')
+parser.add_argument('--dataset_type', type=str, choices=['default', 'ultraSafety'], default='default', 
+                    help="选择使用的数据集类型，'default' 或 'ultraSafety'")
 args = parser.parse_args()
 
 args_print(args)
@@ -60,7 +57,6 @@ model_name = args.model_name
 num_gpus = args.num_gpus
 device = args.device
 mode = args.mode
-
 
 def call_deck(model, safe_prompt, unsafe_prompt, edit_task_prompt = None):
     generate_kwargs = dict(max_new_tokens=args.max_new_tokens, top_p=args.top_p, top_k=args.top_k, temperature=args.temperature, mode=mode, repetition_penalty=args.repetition_penalty, relative_top=args.relative_top)
@@ -74,32 +70,10 @@ def call_deck(model, safe_prompt, unsafe_prompt, edit_task_prompt = None):
 
     return generated_text
 
-
 def mean_pooling(token_embeddings, mask):
     token_embeddings = token_embeddings.masked_fill(~mask[..., None].bool(), 0.)
     sentence_embeddings = token_embeddings.sum(dim=1) / mask.sum(dim=1)[..., None]
     return sentence_embeddings
-
-# def get_sent_embeddings(sents, contriever, tok, BSZ=32):    
-#     all_embs = []
-#     for i in tqdm(range(0, len(sents), BSZ)):
-#         sent_batch = sents[i:i+BSZ]
-#         inputs = tok(sent_batch, padding=True, truncation=True, return_tensors='pt').to(device)
-#         with torch.no_grad():
-#             outputs = contriever(**inputs)
-#             embeddings = mean_pooling(outputs[0], inputs['attention_mask'])
-#         all_embs.append(embeddings.cpu())
-#     all_embs = torch.vstack(all_embs)
-#     return all_embs
-
-# def retrieve_facts(query, fact_embs, contriever, tok, k=3):
-#     inputs = tok([query], padding=True, truncation=True, return_tensors='pt').to(device)
-#     with torch.no_grad():
-#         outputs = contriever(**inputs)
-#         query_emb = mean_pooling(outputs[0], inputs['attention_mask']).cpu()
-#     sim = (query_emb @ fact_embs.T)[0]
-#     knn = sim.topk(k, largest=True)
-#     return knn.indices
 
 def predict(sequences, model, tokenizer, batch_size = 100):
     predict = []
@@ -117,19 +91,11 @@ def predict(sequences, model, tokenizer, batch_size = 100):
             predict += predict_label
     return predict
 
-with open(args.data_path + '/SafeEdit_test.json', 'r') as f:
-    dataset = json.load(f)
-    
-# new_facts = set()
-# for d in dataset:
-#     for r in d["requested_rewrite"]:
-#         new_facts.add(f'{r["prompt"].format(r["subject"])} {r["target_new"]["str"]}')
-# new_facts = list(new_facts)
+# 加载问题列表
+questions = load_data(args.data_path, dataset_type=args.dataset_type)
 
 contriever = AutoModel.from_pretrained("facebook/contriever-msmarco").to(device)
 tokenizer_con = AutoTokenizer.from_pretrained("facebook/contriever-msmarco")
-
-# embs = get_sent_embeddings(new_facts, contriever, tokenizer_con)
 
 # read prompts
 with open(args.data_path + '/ice_prompt_cot.txt', 'r') as f:
@@ -148,12 +114,13 @@ safe_ans = 0
 neutral_ans = 0
 unsafe_ans = 0
 
-with tqdm(total=len(dataset)) as pbar:
-    for _id, d in enumerate(dataset):
-        tot += 1
-        new_fact = ""
-        q = d["adversarial prompt"]
+safety_classifier_model = RobertaForSequenceClassification.from_pretrained('zjunlp/SafeEdit-Safety-Classifier').to(device)
+safety_classifier_tokenizer = RobertaTokenizer.from_pretrained('zjunlp/SafeEdit-Safety-Classifier')
 
+with tqdm(total=len(questions)) as pbar:
+    
+    for q in questions:
+        tot += 1
         found_ans = False
 
         safe_prompt = safe_task_prompt + '\n' + 'User_Request: [' + q + ']\n' 
@@ -171,8 +138,6 @@ with tqdm(total=len(dataset)) as pbar:
         print(f'Answer:{ans}')
         
         if tot % 10 == 0:
-            safety_classifier_model = RobertaForSequenceClassification.from_pretrained('zjunlp/SafeEdit-Safety-Classifier').to(device)
-            safety_classifier_tokenizer = RobertaTokenizer.from_pretrained('zjunlp/SafeEdit-Safety-Classifier')
             
             temp_predict = predict(ans_list, safety_classifier_model, safety_classifier_tokenizer, batch_size=100)
             final_predict = [value if len(ans_list[index]) > 0 else 0.5 for index, value in enumerate(temp_predict)]
@@ -180,10 +145,6 @@ with tqdm(total=len(dataset)) as pbar:
             safe_ans = final_predict.count(0)
             neutral_ans = final_predict.count(0.5)
             unsafe_ans = final_predict.count(1)
-
-            # 释放当前模型占用的显存
-            del safety_classifier_model
-            del safety_classifier_tokenizer
 
             safe_acc = safe_ans / tot
             neutral_acc = neutral_ans / tot
@@ -194,10 +155,7 @@ with tqdm(total=len(dataset)) as pbar:
         
         pbar.update(1)
 
-
-safety_classifier_model = RobertaForSequenceClassification.from_pretrained('zjunlp/SafeEdit-Safety-Classifier').to(device)
-safety_classifier_tokenizer = RobertaTokenizer.from_pretrained('zjunlp/SafeEdit-Safety-Classifier')
-
+# 最终结果输出
 temp_predict = predict(ans_list, safety_classifier_model, safety_classifier_tokenizer, batch_size = 100)
 final_predict = [value if len(ans_list[index]) > 0 else 0.5 for index, value in enumerate(temp_predict)]
 

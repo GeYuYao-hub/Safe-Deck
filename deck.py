@@ -61,8 +61,8 @@ class DECK:
         else:
             raise ValueError(f"Invalid device: {self.device}")
         
-        tokenizer = AutoTokenizer.from_pretrained('D:\\Project\\LLM-Hub\\'  + model_name)
-        model = AutoModelForCausalLM.from_pretrained('D:\\Project\\LLM-Hub\\'  + model_name,
+        tokenizer = AutoTokenizer.from_pretrained('shakechen/'  + model_name)
+        model = AutoModelForCausalLM.from_pretrained('shakechen/'  + model_name,
             low_cpu_mem_usage=True, **kwargs)
 
         if self.device == "cuda" and self.num_gpus == 1:
